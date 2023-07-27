@@ -1,0 +1,697 @@
+---
+title: "Práctica I"
+description: |
+  Análisis de componentes principales
+author:
+  - name: Alejandro Lema Fernández (DNI 11864880-P)
+    affiliation: Universidad Complutense de Madrid
+    affiliation_url: 
+date: "`r Sys.Date()`"
+output:
+    distill::distill_article:
+        highlight: kate
+        colorlinks: true
+        code_folding: false
+        toc: true            
+        toc_depth: 3     
+---
+
+```{r setup, include = FALSE}
+# Ajuste comunes de los chunk
+knitr::opts_chunk$set(fig.width = 9, fig.asp = 1, out.width = "100%",
+                      message = FALSE, warning = FALSE,
+                      echo = TRUE, res = 400)
+```
+
+# Instrucciones (leer antes de empezar)
+
+* Modifica dentro del documento `.Rmd` tus datos personales (nombre y DNI) ubicados en la cabecera del archivo.
+
+* Asegúrate antes de seguir editando el documento que el archivo `.Rmd` compila (Knit) correctamente y se genera el `html` correspondiente.
+
+* Los chunks creados están o vacíos o incompletos, de ahí que tengan la opción `eval = FALSE`. Una vez que edites lo que consideres debes de cambiar a `eval = TRUE` para que los chunk se ejecuten
+
+## Paquetes necesarios
+
+Necesitaremos los siguientes paquetes:
+
+```{r paquetes}
+# Borramos variables del environment
+rm(list = ls())
+library(readxl)
+library(skimr)
+library(corrr)
+library(corrplot)
+library(ggforce)
+library(ggthemes)
+library(tidyverse)
+library(tidymodels)
+library(factoextra)
+library(FactoMineR)
+library(ggplot2)
+```
+
+
+# Carga de datos
+
+El archivo de datos a usar será `distritos.xlsx`
+
+```{r}
+distritos <- read_xlsx(path = "./distritos.xlsx")
+```
+
+El fichero contiene **información socioeconómica de los distritos de Madrid**
+
+```{r}
+glimpse(distritos)
+```
+
+
+Las variables recopilan la siguiente información:
+
+* `Distrito`: nombre del distrito
+* `Superficie`: superficie del distrito (hectáreas)
+* `Densidad`: densidad de población
+* `Pob_0_14`: proporción de población menor de 14 años
+* `Pob_15_29`: proporción de población de 15 a 29
+* `Pob_30_44`: proporción de población de 30 a 44
+* `Pob_45_64`: proporción de población de 45 a 64
+* `Pob_65+`: proporción de población de 65 o mas
+* `N_Española`: proporción de población española
+* `Extranjeros`: proporción de población extranjera
+* `N_hogares`: número de hogares en miles
+* `Renta`: renta media en miles
+* `T_paro`: porcentaje de población parada
+* `T_paro_H`: porcentaje de hombres parados
+* `T_paro_M`: porcentaje de mujeres paradas
+* `Paro_LD`: proporción de población parada de larga duración
+* `Analfabetos`: proporción de población que no sabe leer ni escribir
+* `Primaria_inc`: proporción de población solo con estudios primarios
+* `ESO`: proporción de población solo ESO
+* `fp_bach`: proporción de población solo con FP o Bachillerato
+* `T_medios`: proporción de población Titulada media
+* `T_superiores`: proporción de población con estudios superiores
+* `S_M2_vivienda`: superficie media de la vivienda
+* `Valor_V`: valor catastral medio de la vivienda
+* `Partido`: partido más votado en las municipales 2019
+
+
+
+
+# Ejercicio 1:
+
+
+> Calcula los estadísticos básicos de todas las variables con la función `skim()` del paquete `{skimr}`
+
+
+```{r eval = TRUE}
+
+distritos %>% skim()
+
+```
+
+# Ejercicio 2
+
+> Selecciona solo las variables numéricas
+
+```{r eval = TRUE}
+
+distritos_num <-
+  distritos %>% select(-c(Distrito, Partido))
+
+```
+
+# Ejercicio 3
+
+> Calcula la matriz de covarianzas (guárdala en `cov_mat`)
+
+```{r eval = TRUE}
+
+cov_mat <-
+  cov(distritos_num)
+
+head(cov_mat[c(1,2,3), c(1,2,3)])
+
+# (no visualizo toda la matriz para ocupar menos espacio)
+
+```
+
+> Calcula la matriz de correlaciones de forma numérica (guárdala en `cor_mat`). Visualiza dicha matriz haciendo uso de `{corrplot}`. Responde además a las preguntas: ¿cuáles son las variables más correlacionadas (linealmente)? ¿Cómo es el sentido de esa correlación?
+
+
+```{r eval = TRUE}
+
+cor_mat <-
+  cor(distritos_num)
+
+head(cor_mat[c(1,2,3), c(1,2,3)]) # valores 1 en la diagonal
+
+```
+
+```{r eval = TRUE}
+
+corrplot(cor_mat, type = "upper",
+         tl.col = "black",  method = "ellipse")
+
+# PREGUNTAS:
+# 1) ¿cuáles son las variables más correlacionadas (linealmente)?
+# 2) ¿Cómo es el sentido de esa correlación?
+
+# 1) Por un lado, tenemos las correlaciones altas obvias, ya estén causadas por
+# variables que suman 100%, y que por tanto, si una toma valores elevados, la otra
+# necesariamente será menor (por ej, N_Española y Extranjeros tienen una correlación
+# muy elevada y negativa, ya que si el porcentaje de Extranjeros es mayor, 
+# necesariamente el de españoles en menor, y vicecersa).
+
+# O los indicadores de estudios, si hay más gente con estudios superiores, 
+# necesariamente la tasa con estudios solo de ESO es forzosamente menor.
+
+# O T_paro y las otras tasas de paro, pues lógicamente si el paro es elevado en
+# general, cabe esperar que lo sea también cuando miramos solo a hombres o solo a 
+# mujeres.
+
+# Más allá de esto, observamos las mayores correlaciones entre:
+# - Densidad y Pob_0_14 (corr negativa, como si la gente con niños pequeños
+#   prefiriese vivir en sitios menos abarrotados)
+# - Las tasas de paro están correlacionadas positivamente con los índices de
+#   estudios de menor nivel (analfabetos, primaria, ESO), mientras que están
+#   negativamente corr con los índices de mayor nivel de estudios (T_superiores)
+# - Las tasas de paro y los niveles de estudio más bajos también están
+#   correlacionadas negativamente con Valor_V y con renta --> en los barrios
+#   con casas más caras y con mayores rentas, vive gente con niveles de estudio
+#   más elevados y con menor tasa de paro.
+
+```
+
+# Ejercicio 4
+
+> Haciendo uso de `{ggplot2}`, representa los gráficos de dispersión de las variables T_paro (eje y) con relación a Analfabetos (eje x). Realiza un nuevo gráfico visualizando T_paro en relación a T_superiores. Comentar el sentido de las nubes de puntos, junto con las correlaciones obtenidas anteriormente. Personaliza el gráfico todo lo que puedas.
+
+```{r eval = TRUE}
+
+ggplot(distritos, aes(x = Analfabetos, y = T_paro)) +
+  geom_point(size = 7, alpha = 0.6, color = 'red') +
+  labs(x = 'Analfabetos', y = 'Tasa de paro',
+       title = 'Tasa de paro vs. Tasa de analfabetismo') +
+  theme_minimal()
+
+```
+
+
+```{r eval = TRUE}
+
+ggplot(distritos, aes(x = T_superiores, y = T_paro)) +
+  geom_point(size = 7, alpha = 0.6, color = 'blue') +
+  labs(x = 'Tasa de estudios superiores', y = 'Tasa de paro',
+       title = 'Paro vs estudios superiores') +
+  theme_minimal()
+
+```
+
+# Ejercicio 5
+
+> Haciendo uso de los paquetes `{FactoMineR}` y `{factoextra}`, realiza un análisis de componentes principales y guárdalo en el objeto `pca_fit`
+
+```{r eval = TRUE}
+
+pca_fit <-
+  PCA(distritos_num, # variabs numéricas
+      scale.unit = TRUE, # para que estandarice los datos
+      ncp = 23, # 23 variabs
+      graph = FALSE)
+
+```
+
+## Ejercicio 5.1
+
+> Obtén los autovalores asociados y detalla los resultados. ¿Cuánto explica la primera componente? ¿Cuánto explican las primeras 10 componentes? Si fijáramos un umbral de varianza explicada del 95%, ¿cuántas componentes deberíamos usar?
+
+```{r eval = TRUE}
+
+pca_fit$eig
+
+# obtenemos 20 autovalores a pesar de tener 23 variabs orig porque 20 variabs
+# ya capturan el 100% de la varianza de los datos. En este caso particular, vemos
+# que esto se debe a que hay dependencia lineal entre algunas de las variabs (las
+# que suman 100% --> una entre N_Española y Extranjeros, otra entre las edades, y
+# otra entre los índices de niveles de estudios)
+
+pca_fit$eig[1,3] # la comp 1 explica el 52.18% de la varianza
+pca_fit$eig[10,3] # las 10 primeras comps explican el 99.00% de la varianza
+
+pca_fit$eig[7,3] # para sobrepasar el umbral del 95% de var expl, necesitamos usar 7 comps
+```
+
+> Visualiza la varianza explicada por cada componente haciendo uso de `fviz_eig()`. Personaliza el gráfico todo lo que consideres
+
+```{r eval = TRUE}
+
+fviz_eig(pca_fit,
+         choice = "variance",
+         ncp = 23, # nº de comp a pintar
+         barfill = "darkolivegreen",
+         addlabels = TRUE) +
+  theme_minimal() +
+  labs() +
+  xlab("Componentes") +
+  ylab("% de varianza explicada") +
+  ggtitle("Varianza explicada por componentes")
+
+```
+
+## Ejercicio 5.2
+
+> Obtén los autovectores (por columnas). Escribe de manera explícita la expresión de la tres primeras componentes (como combinación lineal de las variables originales).
+
+
+```{r eval = TRUE}
+
+pca_fit$svd$V # autovectores (por columnas)
+
+# los autovectores (loadings) son las coordenadas de las componentes respecto a las variabs orig
+
+pca_fit$svd$V[ ,1] # coords de la comp 1
+pca_fit$svd$V[ ,2] # coords de la comp 2
+pca_fit$svd$V[ ,3] # coords de la comp 3
+
+```
+
+$$\Phi_1 = - 0.045*Superficie - 0.050*Densidad + 0.056*Pob.0.14 + 0.167*Pob.15.29 + 0.009*Pob.30.44 + 0.156*Pob.45.64- 0.171*Pob.65+ - 0.212*N.Española + 0.205*Extranjeros + 0.041*N.hogares - 0.273*Renta + 0.287*T.paro + 0.286*T.paro.H + 0.283*T.paro.M + 0.149*Paro.LD + 0.276*Analfabetos + 0.276*Primaria.inc + 0.282*ESO + 0.052*fp.bach - 0.248*T.medios - 0.274*T.superiores - 0.200*S.M2.vivienda - 0.266*Valor.V $$
+
+$$\Phi_2 = 0.235*Superficie - 0.414*Densidad + 0.390*Pob.0.14 - 0.232*Pob.15.29 -0.263*Pob.30.44 + 0.177*Pob.45.64 - 0.066*Pob.65+ + 0.267*N.Española - 0.302*Extranjeros - 0.189*N.hogares + 0.039*Renta - 0.009*T.paro + 0.028*T.paro.H - 0.058*T.paro.M + 0.275*Paro.LD + 0.095*Analfabetos + 0.049*Primaria.inc + 0.071*ESO + 0.311*fp.bach + 0.153*T.medios - 0.130*T.superiores + 0.130*S.M2.vivienda - 0.111*Valor.V $$
+
+```{r eval = TRUE}
+
+# Phi_3 se obtiene de forma análoga a las anteriores. Sus parámetros están en pca_fit$svd$V[ ,3], vistos arriba.
+
+```
+
+## Ejercicio 5.3
+
+> Obtén las nuevas coordenadas (scores) de las observaciones proyectados en las nuevas direcciones
+
+```{r eval = TRUE}
+
+pca_scores <- as_tibble(pca_fit$ind$coord)
+pca_scores # Nuevas coordenadas (21 filas porque hay 21 observaciones originales!)
+
+```
+
+
+# Ejercicio 6
+
+> Con el número de componentes (anteriormente determinado) que necesitamos para explicar al menos el 95% de varianza, repite el mismo análisis que en el ejercicio 5.
+
+> Haciendo uso de los paquetes `{FactoMineR}` y `{factoextra}`, realiza un análisis de componentes principales y guárdalo en el objeto `pca_fit`
+
+```{r eval = TRUE}
+
+pca_fit <-
+  PCA(distritos_num, # variabs numéricas
+      scale.unit = TRUE, # para que estandarize los datos
+      ncp = 7, # esta vez queremos solo 7 comp (para superar el 95% de varianza explicada)
+      graph = FALSE)
+
+```
+
+
+> [Extra] Construye un gráfico para visualizar la varianza explicada acumulada de las 7 comps (con una línea horizontal que nos indique el umbral del 95%)
+
+```{r eval = TRUE}
+
+cumvar <- as_tibble(pca_fit$eig)
+names(cumvar) <- c("lambda", "var", "cumvar")
+
+ggplot(cumvar[1:7, ],
+       aes(x=1:7, y=cumvar)) +
+  geom_col(fill = "pink") +
+  geom_hline(yintercept = 95) + # pintar el 95%
+  theme_minimal() +
+  scale_x_discrete(limit = c("Dim 1","Dim 2","Dim 3","Dim 4","Dim 5","Dim 6","Dim 7")) +
+  labs() +
+  xlab("Componentes") +
+  ylab("% de varianza ACUMULADA explicada") +
+  ggtitle("Varianza ACUMULADA explicada por componentes")
+
+```
+
+> Visualiza la varianza explicada por cada componente haciendo uso de `fviz_eig()`. Personaliza el gráfico todo lo que consideres
+
+```{r eval = TRUE}
+
+fviz_eig(pca_fit,
+         choice = "variance",
+         ncp = 7, # esta vez queremos solo 7 comp 
+         barfill = "darkolivegreen",
+         addlabels = TRUE) +
+  theme_minimal() +
+  labs() +
+  xlab("Componentes") +
+  ylab("% de varianza explicada") +
+  ggtitle("Varianza explicada por componentes")
+
+```
+
+```{r eval = TRUE}
+
+pca_fit$ind$coord
+# los scores (ahora solo guardaríamos los de las 7 comps seleccionadas)
+
+# los guardamos en formato tibble
+pca_scores <- as_tibble(pca_fit$ind$coord)
+pca_scores # Nuevas coordenadas (21 filas porque hay 21 observaciones originales!)
+
+```
+
+## Ejercicio 6.1 
+
+> Ejecuta el código inferior y detalla cada una de las salidas. Detalla todo lo que consideres. En particular, ¿qué distritos van a tener características similares? Justifica la respuesta
+
+```{r eval = TRUE}
+
+pca_fit$ind$coord # este elemento contiene las coordenadas de nuestras observaciones
+# (ie, de los distritos) en la nueva base de 7 comps principales. Por eso vemos en
+# las cols las 7 Dims seleccionadas por el PCA, y en las filas tenemos las 21 observaciones.
+
+# Por ej, en nuestro dataset original en la fila 1 tenemos los valores del distrito
+# "CENTRO" para las variabs orig. Pues en esta salida, en la fila 1, tenemos los
+# valores del distrito "CENTRO" para las 7 comps principales seleccionadas.
+
+pca_fit$ind$cos2 # en términos cualitativos, este elemento aporta una estimación
+# de la calidad de representación, es decir, nos da una indicación de lo bien
+# representada que está una observación en las comps principales (de tal manera
+# que, a mayor valor de cos2, mejor representada está). 
+
+# Cada observación (las 21 filas) tiene un valor de cos2 asociado a cada comp
+# (las 7 cols), de modo que una observación puede estar mejor representada en una
+# comp, pero peor en otra. Por ej,el distrito 17 tiene el cos2 más alto en
+# Dim.1 (0.929), pero también tiene el más bajo en Dim.2 (1.099e-05). De hecho,
+# más adelante veremos la representación gráfica de los distritos en las
+# comps 1 y 2, y podremos ver que el distrito 17 tiene un score alto en
+# la Dim.1, mientras que su score en Dim.2 es prácticamente nulo (recoredemos que
+# también disponemos de los valores exactos de los scores).
+
+# En otras palabras, la información de la observación 17 está bien representada
+# en la comp 1, pero mal representada en la comp 2.
+
+pca_fit$ind$contrib # la contribución representa lo mismo que el cos2, pero
+# expresado en porcentaje, de tal modo que las contribuciones de las 21 observaciones
+# a cada comp principal suman 100%.
+
+# colSums(pca_fit$ind$contrib) # comprobación de que suman 100%
+
+# Siguiendo con el ejemplo del distrito 17, vemos que su contrib a la comp 1
+# es 11.94%, mientras que en la comp 2 es prácticamente 0%.
+
+# ¿Qué distritos van a tener características similares?
+# RESPUESTA:
+# Lógicamente, los distritos que tengan coordenadas similares en la nueva base
+# de comps principales tendrán características similares (ie, valores similares
+# de las variabs orig).
+
+```
+
+
+## Ejercicio 6.2
+
+> Ejecuta el código inferior y detalla cada una de las salidas. Detalla todo lo que consideres. En particular, ¿qué variables van a estar mejor representadas (la información que contienen) si hacemos uso solo de las 2 primeras componentes? Justifica tu respuesta
+
+```{r eval = TRUE}
+
+# La siguientes salidas explican los mismos 3 elementos que las del apartado
+# anterior, solo que ahora referidas a las variabs orig en lugar de a las
+# observaciones (ahroa tendremos tablas con las 23 variabs y las 7 comps):
+
+pca_fit$var$coord # si los autovectores (loadings) eran las coordenadas de las
+# comps principales expresadas en la base de variabs orig, ahora lo que nos devuelve
+# esta salida es lo contrario: las coords de las variabs orig expresadas en
+# la base de comps principales (en cada fila, tenemos las 7 coords de una de
+# las variabs orig).
+
+pca_fit$var$cos2 # el cos2 nos da una estimación de lo bien representada que
+# está cada variab orig en cada comp principal (de tal manera que, a mayor valor
+# de cos2, mejor representada está). Si una variab tiene un cos2 muy cercano a 0
+# para cierta Dim, significa que esa Dim no captura la información de la variab,
+# minetras que si es muy cercano a 1, significa que esa Dim y la variab reflejan
+# prácticamente la misma información.
+
+pca_fit$var$contrib # nuevamente, la contrib es el cos2 expresado en porcentaje,
+# por lo que vuelve a reflejar la calidad de representación de cada variab en cada comp.
+
+# colSums(pca_fit$var$contrib) # suman 100%
+
+# ¿Qué variables van a estar mejor representadas si hacemos uso solo de las 2 primeras componentes?
+# RESPUESTA:
+# Las variabs mejor representadas en Dim.1 y Dim.2 son las que mayor valor de
+# cos2 total tengan para esas comps.
+
+as.data.frame(rowSums(pca_fit$var$cos2[,c(1,2)])) %>%
+  slice_max(rowSums(pca_fit$var$cos2[,c(1,2)]),
+            n = 6)
+
+# Luego las variabs mejor representadas son: T_paro, T_paro_H, ESO, T_superiores y T- paro_M.
+
+# También podemos verlo visualmente con:
+fviz_cos2(pca_fit, choice = "var", axes = 1:2, # cos2 total de las variabs para comps 1 y 2
+          title = "Calidad de representación de cada variab orig respecto a Dim.1 y Dim.2",
+          color = "black",
+          fill = "orange") + 
+          ylab("Cos2 - calidad de representación")
+
+# Nota adicional: también podemos verlo con el gráfico 'fviz_pca_var' (representando
+# Dim.1 y Dim.2 y fijándolos en el "peso") que veremos más adelante.
+
+```
+
+# Ejercicio 7
+
+> Realiza de nuevo el análisis pero introduciendo todas las variables, incluyendo las cualitativas (sin que sean usadas en la construcción de las nuevas direcciones pero que luego podamos obtener dichas variables proyectadas), con el número de componentes determinadas anteriormente para explicar el 95% de la varianza.
+
+```{r eval = TRUE}
+
+pca_fit <-
+  PCA(distritos,
+      quali.sup = c(1,25), # le indicamos las variabs categóricas suplementarias!!!
+      scale.unit = TRUE, ncp = 7, # 7 comps
+      graph = FALSE)
+
+```
+
+## Ejercicio 7.1
+
+> Ejecuta `fviz_pca_var()` para visualizar las variables respecto a las dos primeras componentes. Asigna el color de las flechas de tal manera que corresponda al módulo (longitud) de la misma. Cambia la paleta de colores que usa para el gradiente de colores como consideres. Detalla todo lo que consideres, en concreto la correlación o independencia lineal de las variables. ¿Qué variables tienen un comportamiento similar? ¿Cuáles están mejor representadas (usando solo las dos primeras componentes)? Prueba a usar también `fviz_cos2()`
+
+```{r eval = TRUE}
+
+col <- c("#00AFBB", "#E7B800", "#FC4E07")
+
+fviz_pca_var(pca_fit, col.var = "cos2", # por dfto axes = 1:2 (comps 1 y 2)
+             gradient.cols = col,
+             repel = TRUE) +
+  theme_minimal() + 
+  labs(color= "Peso") +
+  ggtitle("Coordenadas de las variables en las dos Comp Principales")
+
+# [Recordemos que estamos pasando de un espacio n-dimensional (cuya base está
+# dada por las n variables orig) a un espacio n-dimensional (pero con una base
+# distinta, de n comps), y luego al seleccionar menos comps principales, lo que
+# hacemos es reducir la dimensionalidad de ese espacio, y por tanto se pierde
+# info al tener que proyectar todas las observaciones de una base a otra con
+# menos dimensiones. En gráfico nos sirve para hacer un análisis cualitativo
+# y visual de qué variabs están bien reflejadas en las Dim 1 y 2 representadas,
+# y cuáles están peor representadas]
+
+# Las variabs cuyo peso es muy cercano a 1 (al círculo de radio 1) son variabs
+# explicadas casi por completo por las comps "Dim 1" y "Dim 2". Por tanto, tienen
+# una alta correlación con las mismas (que será corr positiva o negativa en función
+# de si la flecha de la variab apunta en elsentido positivo o negativo de la
+# componente con la que estemos contrastando), mientras que son bastante
+# independientes del resto de nuevas componentes.
+
+# Las variabs ESO, Primaria_ inc, T_paro, T_paro_H y T- paro_M apuntan en el
+# sentido positivo de Dim 1, y todas con pesos muy elevados. En otras palabras,
+# todas ellas tienen efectos muy similares sobre nuestra variable Objetivo
+# "Partido". Lógicamente, al ser tan similares a Dim 1, tienen una corr alta
+# con ella, y por su parte, su corr con Dim 2 es menor. 
+
+# Podemos razonarlo de forma similar para todas las variables.
+
+# Respecto a la calidad de la representación de las variabs en las comps 1 y 2,
+# ya lo vimos en el EJERCICIO 6.2, cuando representamos el gráfico 'fviz_cos2'.
+
+```
+
+## Ejercicio 7.2
+
+> Ejecuta `fviz_pca_ind()` para visualizar a los distritos respecto a las dos primeras componentes. Usa la variable de partido para visualizar en dos colores distintos los individuos. ¿Qué distritos tienen características similares? Analiza todo lo que consideres
+
+```{r eval = TRUE}
+
+fviz_pca_ind(pca_fit,
+             axes = c(1,2), # c(x,y) Dim_x & Dim_y a representar (gráfico bidim)
+             habillage = "Partido",
+             title = "Observaciones (distritos) para las comps Dim1 y Dim2")
+
+```
+
+## Ejercicio 7.3
+
+> Haciendo uso del gráfico anterior y de lo que consideres dentro de `pca_fit`, ¿qué representaría (aprox) cada una de las primeras 3 componentes? ¿Qué tipo de información está capturando cada una?
+
+```{r eval = TRUE}
+
+# veamos qué variabs están mejor representadas en cada comp:
+
+par(mfrow=c(3,1)) # para meter los 3 subplots en un único plot
+
+fviz_cos2(pca_fit,
+          choice = "var", # var o ind
+          axes = 1,       # Dim-X a observar
+          fill = "red")
+
+fviz_cos2(pca_fit,
+          choice = "var",
+          axes = 2,
+          fill = "blue")
+
+fviz_cos2(pca_fit,
+          choice = "var",
+          axes = 3,
+          fill = "yellow")
+
+# observando estos 3 gráficos + el gráfico fviz_pca_var del EJERCICIO 7.1, deducimos que:
+
+# - DIM.1 representa principalmente la información socioeconómica asociada a las
+# tasas de paro, a los niveles de estudio, a la renta, y al valor de la vivienda.
+
+# - Dim.2 representa principalmente la información asociada a la densidad de población,
+# y al porcentaje de menores de 14 años.
+
+# - Dim.3 tiene valores de cos2 bajos, por lo que no representa demasiado bien
+# ninguna variab orig. No obstante, con la siguiente representación vemos que la
+# combinación de las componentes 2 y 3 nos explica principalmente la información
+# relativa a la población: tanto los % de población como la densidad (y lógicamente,
+# si tienes población y densidad, tienes superficie, que vemos que también está
+# relativamente bien representada por estas dos componentes):
+
+fviz_pca_var(pca_fit, col.var = "cos2",
+             gradient.cols = col,
+             axes = c(2,3), # con axes elegimos las Dims que queremos ver
+             repel = TRUE) +
+  theme_minimal() + 
+  labs(color= "Peso") +
+  ggtitle("Coordenadas de las variables en las Comp 2 y 3")
+
+```
+
+## Ejercicio 7.4
+
+> Haz uso de `fviz_pca_biplot()` para visualizar los dos gráficos anteriores de forma conjunta y personaliza todo lo que consideres del gráfico. Detalla lo que consideres del gráfico y analiza los grupos de distritos creados en función del partido más votado (le indicamos que el color dependa de dicha variable en `col.ind`)
+
+
+```{r eval = TRUE}
+
+fviz_pca_biplot(pca_fit,
+                col.ind = distritos$Partido,
+                palette = "jco",
+                addEllipses = TRUE,
+                label = c("var","ind"),
+                col.var = "black",
+                repel = TRUE,
+                legend.title = "Partido más votado")
+
+# comentar las características socioeconómicas de algunos grupos de distritos:
+# RESPUESTA:
+# Se observa que los distritos donde gana el PP tienden a ser los de mayor Renta,
+# N_Española, Pob_65+, T_superiores, Valor_V y S_M2_vivienda.
+
+# Por otra parte, podemos distinguir algunos subgrupos de distritos en los que
+# gana Más Madrid que tienen características similares:
+# - a la derecha del gráfico, el subgrupo de distritos con altas tasas de paro,
+#   y elevados índices de personas con estudios de nivel bajo (ESO, Primaria_ inc).
+# - En el primer cuadrante del gráfico, también vemos otro subgrupo de distritos
+#   con alta tasa de paro de larga duración, población adulta evejecida (45 a 64),
+#   niveles de estudios algo superiores, sobretodo entre Primaria, ESO y fp_bach.
+
+```
+
+
+# Ejercicio 8
+
+> ¿Qué valor tiene el distrito de Salamanca en la Componente 1? ¿Y Villaverde? ¿Qué distrito tiene un valor más alto de la Componente 4? Ejecuta el código que consideres
+
+```{r eval = TRUE}
+
+# pca_fit$ind$coord # scores
+
+pca_fit$ind$coord[which(distritos$Distrito == "SALAMANCA"), 1]
+# Salamanca tiene Dim1 = -4.326
+pca_fit$ind$coord[which(distritos$Distrito == "VILLAVERDE"), 1]
+# Villaverde tiene Dim1 = 5.483
+
+distritos$Distrito[which.max(pca_fit$ind$coord[ ,"Dim.4"])]
+# El distrito con valor más alto de la comp 4 es FUENCARRAL-EL PARDO
+
+```
+
+# Ejercicio 9
+
+> Comenta/concluye todo lo que consideres tras un análisis numérico y visual, y que no haya sido preguntado.
+
+# Ejercicio 10 (extra)
+
+> Haz uso de tidymodels para calcular las componentes y las 5 componentes que más varianza capturan en una matriz de gráficas (la diagonal la propia densidad de las componentes, fuera de la diagonal los datos proyectados en la componente (i,j)). Codifica el color como el partido más votado. Al margen de la varianza explicada, ¿qué par de componentes podrían servirnos mejor para «clasificar» nuestros barrios según el partido más votado (variables que segmenten mejor mi espacio)?
+
+```{r eval = TRUE}
+
+receta <- 
+  recipe(Partido ~ ., data = distritos[ ,-1]) %>%
+  # Species es la varOBj # no metemos el Distrito pq es la variab identificativa
+  # Imputamos por la media las numéricas, por la moda las cuali
+  step_impute_mean(all_numeric_predictors()) %>%
+  step_impute_mode(all_nominal_predictors()) %>%
+  # Estandarizamos
+  step_normalize(all_numeric_predictors())
+receta
+
+# b) Añadir el pca análisis:
+receta <-
+  receta %>%
+  step_pca(all_numeric_predictors(), num_comp = 5, # (*)
+           prefix = "PC")
+
+# (*) recuerda que no podemos poner 23 por las variabs orig linealmente dependientes
+
+# c) aplicar:
+data_pc <- bake(receta %>% prep(), new_data = NULL)
+data_pc
+names(data_pc)
+
+ggplot(data_pc) +
+    ggforce::facet_matrix(vars(PC1,PC2,PC3,PC4,PC5),
+                        layer.diag = 2) + # opciones gráficas --> 2, TRUE, FALSE, NULL
+  
+  geom_point(aes(x = .panel_x, y = .panel_y,
+                 color = Partido, fill = Partido),
+             alpha = 0.8, size = 1.8) +
+  
+  ggforce::geom_autodensity(aes(x = .panel_x, y = .panel_y,
+                 color = Partido, fill = Partido),
+                            alpha = 0.3) + # alpha - transparencia del relleno de la curva
+ 
+  scale_color_brewer(palette = "Dark2") + 
+  scale_fill_brewer(palette = "Dark2")
+
+# ¿Qué par de componentes podrían servirnos mejor para «clasificar» nuestros
+# barrios según el partido más votado?
+# RESPUESTA:
+# Visualizando el gráfico, vemos que cualquier combinación de PC1 con PC2, PC3,
+# PC4 o PC5 (la fila de arriba del gráfico -o la columna de la izquierda-) nos sirve
+# para clasificar adecuadamente, ya que las observaciones de uno y otro partido
+# quedan claramente separadas en dos "clusters" que no se entremezclan.
+
+
+```
+
+
+

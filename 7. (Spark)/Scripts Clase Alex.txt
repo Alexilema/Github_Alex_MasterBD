@@ -1,0 +1,79 @@
+
+
+
+
+
+PV_selection = flightsDF.where((F.col('DayOfWeek')==7) & (F.col('ArrDealy').cast('int') > 15))/
+	.select(F.col('Origin'), 'Dest', F.col('DayOfWeek'), F.col('ArrDelay')) # permite mezclar obj col y strings con el nombre
+
+PV_selection.show()
+PV_selection.printSchema()
+
+**************
+
+def columns_unique(df, columns=[]):
+	if not columns: # if len(columns)==0:
+		columns = df.columns
+	for col in columns:
+		print(f' La columna {col} tiene {df.select('col').distinct().count()} valores distintos')
+
+columns_unique(flightsDF, ['Month', 'OriginCity'])
+
+
+**************
+
+
+def conteo_df(df):
+	conteo = [F.countDistinct(col).alias(col) for col in df.columns]
+	return df.select(conteo)
+
+	// RECUERDA: countDistinct (al igual que el resto de funciones del paquete F.) se aplica a un obj columna y devuelve tmb un obj columna, no un entero
+	/ 'conteo' define la estructura de columnas, para luego meterlo en df.select y que ahí ya sí se calcule lo que queremos
+	// hacemos select sobre el df, donde seleccionamos varias columnas de una sola fila cada una
+	// RECUERDA: select no es solo para seleccionar cols de un df ya existentes, sino que se puede usar tmb como withColumn, o sea, para crear cols "al vuelo"
+
+resultado = conteo_df(flightsDF)
+
+
+****************
+
+df_selection = flightsDF.select('Origin','OriginCity',
+				F.concat_ws("-",'Origin','OriginCity').alias('Concatenado'))
+// en select, se puede usar "*" como argumento
+
+CONCEPTO CLAVE: transformaciones son NARROW (y no WIDE) si para hacer la transf, solo es necesario buscar en esa misma fila y no en otras filas 
+
+nota: a veces una función puede no admitir arg como string (por ej 'Origin'). No problem, siempre aceptará obj col F.col('Origin')
+
+Para desplegar la documentación de una función en Spark: cursor sobre la func, y tabulador
+
+
+O bien con SQL puro y una func SQL pura:
+df_selection = flightsDF.selectExpr("concat_ws(sep=Dest,Origin,OriginCity) as concatenado")
+
+--------------
+--------------
+--------------
+# F.countDistinct(....)
+ 
+a = F.max(...)
+ 
+def conteo(df):
+   vars = [F.countDistinct(c).alias(c) for c in df.columns]
+   return df.select(vars)
+   #return resultado
+   
+   
+ 
+   
+var= [F.countDistinct(c).alias(c) for c in df.columns]
+collect()
+ 
+ 
+ 
+ 
+ 
+cleanFlightsDF.groupBy("Origin", "Dest").agg(
+    F.mean("ArrDelay").alias("avgDelay"),
+    F.count("*").alias("numVuelos")
+).sort(F.col("avgDelay").desc()).show()

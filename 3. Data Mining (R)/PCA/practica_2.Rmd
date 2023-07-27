@@ -1,0 +1,1092 @@
+---
+title: "Práctica II"
+description: |
+  Análisis clúster
+author:
+  - name: Alejandro Lema Fernández (DNI 11864880-P)
+    affiliation: Universidad Complutense de Madrid
+    affiliation_url: 
+date: "`r Sys.Date()`"
+output:
+    distill::distill_article:
+        highlight: kate
+        colorlinks: true
+        code_folding: false
+        toc: true            
+        toc_depth: 3     
+---
+
+```{r setup, include = FALSE}
+# Ajuste comunes de los chunk
+knitr::opts_chunk$set(fig.width = 9, fig.asp = 1, out.width = "100%",
+                      message = FALSE, warning = FALSE,
+                      echo = TRUE, res = 400)
+```
+
+# Instrucciones (leer antes de empezar)
+
+* Modifica dentro del documento `.Rmd` tus datos personales (nombre y DNI) ubicados en la cabecera del archivo.
+
+* Asegúrate antes de seguir editando el documento que el archivo `.Rmd` compila (Knit) correctamente y se genera el `html` correspondiente.
+
+* Los chunks creados están o vacíos o incompletos, de ahí que tengan la opción `eval = FALSE`. Una vez que edites lo que consideres debes de cambiar a `eval = TRUE` para que los chunk se ejecuten
+
+## Paquetes necesarios
+
+Necesitaremos los siguientes paquetes:
+
+* **Manejo de datos**: paquete `{tidyverse}`.
+* **Modelos**: paquete `{tidymodels}`
+* **Lectura excel**: paquete `{readxl}`
+* **Resumen numérico**: paquete `{skimr}`.
+* **Visualización de clústers y PCA**: paquete `{factoextra}` y `{FactoMineR}`
+* **Clustering divisivo**: paquete `{cluster}`
+
+```{r paquetes}
+# Borramos variables del environment
+rm(list = ls())
+library(tidyverse)
+library(tidymodels)
+library(readxl)
+library(skimr)
+library(factoextra)
+library(FactoMineR)
+library(cluster)
+
+library(corrplot)
+library(scales)
+library(heatmaply)
+```
+
+
+# Carga de datos
+
+El archivo de datos a usar será `provincias.xlsx`
+
+```{r}
+provincias <- read_xlsx(path = "./provincias.xlsx")
+```
+
+El fichero contiene **información socioeconómica de las provincias españolas**
+
+```{r}
+glimpse(provincias)
+```
+
+
+Algunas de las variables son:
+
+* `Prov`: nombre de la provincia
+* `Poblacion`: habitantes
+* `Mortalidad`, `Natalidad`: tasa de mortalidad/natalidad (en tantos por mil)
+* `IPC`: índice de precios de consumo (sobre un valor base de 100).
+* `NumEmpresas`: número de empresas.
+* `PIB`: producto interior bruto
+* `CTH`: coyuntura turística hotelera (pernoctaciones en establecimientos hoteleros)
+
+# Ejercicio 1:
+
+> Calcula la matriz de covarianzas y de correlaciones. Usa el paquete `{corrplot}` para una representación gráfica de la misma. Detalla y comenta lo que consideres para su correcta interpretación.
+
+```{r eval = TRUE}
+
+cov_mat <- provincias %>% select(-Prov) %>% cov() # quitamos la variab (id) categórica
+
+cor_mat <- provincias %>% select(-Prov) %>% cor()
+
+head(cor_mat[c(1,2,3), c(1,2,3)])
+
+corrplot(cor_mat, type = "upper",
+         tl.col = "black",  method = "ellipse")
+
+# Para interpretar este gráfico, recordemos que se trata de la representación de la
+# matriz de correlaciones entre las variables numéricas de nuestro dataset. La
+# matriz es, lógicamente, cuadrada (18x18 en nuestro caso) y simétrica, y realmente
+# nos vasta con representar solo uno de los lados de la diagonal principal para tener
+# todas las correlaciones representadas. Obviamente, una variable consigo misma 
+# tiene una corr = 1 exacta, por lo que los valores en la diagonal corresponden
+# a corr = 1, y por eso se pintan con el tono de azul correspondiente a 1, y como 
+# una línea recta. El resto de corr se representan también utilizando tanto el 
+# color como la forma de elipse, con sus ejes más desiguales cuanto mayor es la
+# corr (hasta que corr = 1 corresponde a eje menor = 0, ie una línea recta).
+# Además, para indicar si la corr es positiva o negativa, además del color, se juega 
+# con la orientación de la elipse.
+# 
+# En nuestro gráfico, vemos que hay varias variables altamente correlacionadas entre sí,
+# todas ellas positivamente, y que, salvo por TVF, todas las variabs altamente corr son de 
+# carácter económico (el dataset tiene variables tanto económicas como poblacionales).
+# 
+# Por otra parte, se ven también bastantes correlaciones bajas, tanto positivas como
+# negativas. Y corr altas negativas hay muy pocas: entre Natalidad y Mortalidad, entre
+# TasaActividad y Mortalidad, y entre IPC y TasaParo.
+
+```
+
+
+# Ejercicio 2:
+
+> Calcula con `eigen()` los autovalores y autovectores de la matriz de correlaciones e interpreta dichos resultados en relación a las componentes principales de las variables originales.
+
+```{r eval = TRUE}
+
+autocosas <- eigen(cor_mat) # autovalores y autovectores
+
+autocosas$values # autovalores
+autocosas$vectors # autovectores
+
+# El dataset original contiene 19 variabs, pero una es la provincia (no numérica),
+# por lo que la matriz de correlaciones es 18x18.
+
+# - Los autovectores (loadings) son las coordenadas de las componentes principales
+#   respecto a las variabs orig.
+#   Cuanto mayor es el autovalor asociado a cada autovector, mayor es la información
+#   (varianza en los datos) que captura ese autovector (esa dirección en el espacio
+#   de variables numéricas estudiado).
+
+# - No hay autovalores (ni por ende, autovectores) repetidos, lo que significa que
+#   todas las variabs orig contienen cierta información que no está capturada en las
+#   demás variabs. Así, podemos tener hasta 18 nuevas comps principales.
+#   Podemos obtener la "varianza explicada acumulada" por cada componente así:
+
+cumsum_var <- cumsum(autocosas$values) / sum(autocosas$values)
+cumsum_var # 6 comps explican el 97% de la varianza
+
+#   Con esto, vemos que con solo 6 comps principales ya explicamos más del 95%
+#   de la varianza.
+
+```
+
+# Ejercicio 3:
+
+> Haciendo uso de `PCA()` del paquete `{FactoMineR}` calcula todas las componentes principales. Repite de nuevo el análisis con el mínimo número de componentes necesarias para capturar al menos el 95% de la información de los datos.
+
+```{r eval = TRUE}
+
+# calculamos todas las comp princ:
+pca_fit <-  PCA(provincias[, -1],
+                scale.unit = TRUE, # pues los datos orig no están estandarizados
+                ncp = 18,
+                graph = FALSE)
+
+# buscamos las que explican el 95% de la varianza:
+pca_fit$eig[ ,3] # varianza acumulada --> con 5 comp llegamos al 94.7%; con 6, al 97.03%
+
+# repetimos el PCA, pero con ncp = 6
+pca_fit <-  PCA(provincias[, -1],
+                scale.unit = TRUE,
+                ncp = 6,
+                graph = FALSE)
+
+```
+
+
+# Ejercicio 4:
+
+> Realiza las gráficas y análisis numéricos que consideres más útiles para poder interpretar adecuadamente al análisis de componentes principales obtenidas. Detalla todo lo que puedas concluir y, en concreto, responde a las siguientes preguntas
+
+
+```{r eval = TRUE}
+
+# 1) varianza explicada por cada comp:
+fviz_eig(pca_fit,
+         choice = "variance",
+         ncp = 6, # nº de autovalores a pintar
+         barfill = "darkolivegreen",
+         addlabels = TRUE) +
+  theme_minimal() +
+  labs() +
+  xlab("Componentes") +
+  ylab("% de varianza explicada") +
+  ggtitle("Varianza explicada por componentes")
+
+# Vemos que con tan sólo una comp principal ya capturamos casi el 64% de la varianza
+# de los datos originales.
+# El 36% restante, no obstante, está más repartido entre el resto de comps.
+
+```
+
+```{r eval = TRUE}
+
+# 2) varianza explicada ACUMULADA:
+cumvar <- as_tibble(pca_fit$eig)
+names(cumvar) <- c("lambda", "var", "cumvar")
+
+ggplot(cumvar[1:6, ],
+       aes(x=1:6, y=cumvar)) +
+  geom_col(fill = "pink") +
+  geom_hline(yintercept = 95) + # pintar el 95%
+  theme_minimal() +
+  scale_x_discrete(limit = c("Dim 1","Dim 2","Dim 3","Dim 4","Dim 5","Dim 6")) +
+  labs() +
+  xlab("Componentes") +
+  ylab("% de varianza ACUMULADA explicada") +
+  ggtitle("Varianza ACUMULADA explicada por componentes")
+
+# Este gráfico contiene información muy similar al anterior, con la diferencia de
+# que nos permite visualizar directamente cuántas comps principales hacen falta para
+# superar el umbral del 95% de varianza acumulada explicada.
+
+```
+
+```{r eval = TRUE}
+
+# 3.a) proyección bidim de las variabs orig sobre las comp 1 y 2 (las de mayor var explicada)
+col <- c("#00AFBB", "#E7B800", "#FC4E07")
+
+fviz_pca_var(pca_fit, col.var = "cos2", # por dfto axes = 1:2 (comps 1 y 2)
+             gradient.cols = col,
+             repel = TRUE) +
+  theme_minimal() + 
+  labs(color= "Peso") +
+  ggtitle("Coordenadas de las variables en las dos Comp Principales")
+  
+# Lo primero que destaca es el hecho de que, de las 18 variabs orig, 11 están
+# altamente correlacionadas con la comp 1. Esto concuerda con lo que vimos
+# anteriormente de que solamente la primera comp ya capturaba casi el 64% de
+# la varianza. También tiene sentido que esto sea así, ya que, si recordamos
+# el corrplot de la matriz de correlaciones cor_mat, veíamos que muchas de
+# las variabs orig estaban altamente correlacionadas entre sí, y por tanto
+# tiene sentido que una sola comp principal pueda explicarlas a todas.
+
+# Por su parte, las otras 7 variabs muestran comportamientos diferentes, y parecen
+# estar relativamente bien explicadas por la combinación de Dim.1 y Dim.2 (recordemos
+# que estas dos comps juntas suman más del 75% de la varianza acumulada explicada), con
+# la clara salvedad de la variab CANE.
+
+# Por último, recordemos que nuestro dataset tiene variabs económicas y poblacionales.
+# Entonces, cabe destacar que las 11 variabs correladas con la comp 1 son todas de
+# carácter económico, a excepción de "Poblacion".
+# Las demás variabs económicas, que no están altamente correlacionadas con la comp 1,
+# son: IPC, VS, TasaParo y TasaActividad.
+# Esta información nos será útil más adelante.
+
+```
+
+```{r eval = TRUE}
+
+# 3.b) 
+# Podemos buscar en qué comps están mejor representadas estas variabs. Por ej, CANE:
+
+which(colnames(provincias[,-1]) == "CANE") # identificar CANE (sin tener en cuenta
+# el número col de la variab categórica, pues no aparece luego en pca_fit)
+
+pca_fit$var$cos2[16, ] # buscamos en qué comps está mejor representada la variab CANE
+
+as.data.frame(pca_fit$var$cos2[16, ]) %>%
+  slice_max(pca_fit$var$cos2[16, ],
+            n = 2) # resultado --> Dim.3 y Dim.5
+
+col <- c("#00AFBB", "#E7B800", "#FC4E07")
+fviz_pca_var(pca_fit, col.var = "cos2",
+             axes = c(3,5),
+             gradient.cols = col,
+             repel = TRUE) +
+  theme_minimal() + 
+  labs(color= "Peso") +
+  ggtitle("Coordenadas de las variables en Dim.3 y Dim.5")
+
+# Vemos cómo Dim.3 y Dim.5 capturan mejor la info de la variab CANE
+
+### (De forma análoga, podríamos estudiar el resto de variabs y comps)
+
+```
+
+> ¿Cuál es la expresión para calcular la primera componente en función de las variables originales?
+
+```{r eval = TRUE}
+
+# los autovectores (loadings) son las coordenadas de las componentes respecto a las variabs orig
+
+pca_fit$svd$V[ ,1] # coords de la comp 1
+
+```
+
+$$Dim_1 = 0.296*Poblacion - 0.106*Mortalidad + 0.041*Natalidad + 0.110*IPC + 0.294*NumEmpresas +
+0.286*Industria + 0.293*Construccion + 0.293*CTH + 0.282*Infor + 0.292*AFS + 0.291*APT + 0.114*TasaActividad - 0.014*TasaParo + 0.294*Ocupados + 0.291*PIB + 0.018*CANE + 0.292*TVF + 0.172*VS $$
+
+
+> Proporciona las nuevas coordenadas de los datos.
+
+```{r eval = TRUE}
+
+# las nuevas coordenadas (o scores) de los datos en la base de 6 comps principales es:
+pca_fit$ind$coord
+
+# los guardamos en formato tibble:
+pca_scores <- as_tibble(pca_fit$ind$coord)
+pca_scores # tabla con sus 52 observaciones (las 52 provincias) y las 6 comps como
+           # nuevas variables (columnas)
+
+```
+
+> ¿Cuál es la contribución de las variables originales en cada componente principal seleccionada? 
+
+```{r eval = TRUE}
+
+pca_fit$var$contrib
+
+```
+
+> ¿Cuál de las variables es la que está peor explicada en función de las dos primeras componentes?
+
+```{r eval = TRUE}
+
+# Visualmente, viendo el gráfico del EJERCICIO 4 pto 3.a) (gráfico fviz_pca_var
+# para Dim.1 y Dim.2) es inmediato responder que la peor explicada por comps 1 y 2
+# es CANE.
+ 
+# Numéricamente, la idea es también fijarnos en el cos2 total de ambas comps:
+which.min(rowSums(pca_fit$var$cos2[,c(1,2)])) # el resultado es CANE
+
+```
+
+
+# Ejercicio 5:
+
+> Si tuviéramos que construir un índice que valorase de forma conjunta el
+desarrollo económico de una provincia, cómo se podría construir utilizando una combinación lineal de todas las variables. ¿Cuál sería el valor de dicho
+índice en Madrid? ¿Cual sería su valor en Melilla? 
+
+```{r eval = TRUE}
+
+# Un índice es un único valor numérico que nos proporcionara una estimación del 
+# desarrollo económico; es decir, que reflejara la mayor cantidad de información 
+# posible contenida en las variables económicas, y que tomara un valor para cada
+# distrito basado en los valores de esas variabs para cada provincia.
+
+# Y hemos visto que la componente principal del análisis PCA hace precisamente eso,
+# buscar una nueva variable (componente) que capture la mayor cantidad de información
+# posible (en una única variable o un único valor, ie, un "índice").
+
+# Por tanto, lo que debemos hacer para construir ese índice es aplicar el PCA a las 
+# variabs orig de carácter económico.
+
+# No obstante, el enunciado indica que usemos TODAS la variables, así que lo que
+# haremos será utilizar el PCA que ya hemos realizado, y utilizar como índice
+# económico la componente en la cual las variables económicas tienen más relevancia
+# (ie, la componente que mejor capture la información económica, que es justamente 
+# lo que queremos que refleje el índice).
+
+# Para identificar esa componente, tendríamos que fijarnos en qué comp tiene los
+# mayores valor total de cos2 (que recordemos nos daba una estimación de lo bien
+# representada que está una variab orig en cada comp).
+which.max( colSums( pca_fit$var$cos2[-c(1,2,3,17,18), ] ) ) # Dim.1
+
+# Además, en este caso en particular, y recordando el gráfico del EJERC 4 apartado 3.b,
+# es inmediato ver que la comp que buscamos es la Dim.1, pues la mayoría de variabs
+# de carácter económico tienen una elevada correlacion con la Dim.1.
+
+# Por tanto, la Dim.1 constituye el índice económico que buscamos.Y el valor del índice
+# para cada provincia será el valor en esa comp de cada provincia, esto es, el score:
+
+aux <- which(provincias$Prov == "Madrid") # Madrid es la fila 30
+pca_fit$ind$coord[aux, 1] # el valor del índice en Madrid es 16.78
+
+pca_fit$ind$coord[which(provincias$Prov == "Melilla"), ]
+# el valor del índice en Melilla es -2.22
+
+# [EXTRA] Podemos ver otras provincias:
+pca_fit$ind$coord[which(provincias$Prov == "Barcelona"), 1] # 13.68
+pca_fit$ind$coord[which(provincias$Prov == "Valencia"), 1] # 4.77
+pca_fit$ind$coord[which(provincias$Prov == "Bizkaia"), 1] # 0.58
+pca_fit$ind$coord[which(provincias$Prov == "Soria"), 1] # -2.40
+
+```
+
+
+# Ejercicio 6:
+
+> Calcula la matriz de distancias de los datos (realiza las modificaciones que sean necesarias antes). Representa dicha matriz con un mapa de calor. ¿Se detectan inicialmente grupos de provincias? ¿Cuántos?
+
+
+```{r eval = TRUE}
+
+# Empezamos el CLUSTERING ANALYSIS
+
+# (Para visualizar mejor los gráficos en los apartados siguientes, vamos a 
+# cambiar los id numéricos por las propias provincias)
+rownames(provincias) <- provincias$Prov
+
+# a) [EXTRA] mapa de calor de los datos (sin estandarizar) - no confundir con
+# la matriz de distancias, que la representaremos después
+
+heatmaply(provincias %>% select(-Prov),
+          seriate = "mean", # Con seriate cambiamos el orden (OLO, mean...)
+          row_dend_left = TRUE,
+          plot_method = "plotly")
+
+# Con los datos sin estandarizar, unos pocos datos de valor numéricos muy alto
+# (concretamente del PIB, sobretodo Barcelona y Madrid) hacen que el resto de valores,
+# en proporción, no se distingan visualmente. Por eso, luego lo veremos mejor en la
+# representación con los datos estandarizados
+
+# (este apartado continua después del gráfico)
+
+```
+
+```{r eval = TRUE}
+
+# b) matriz de distancias (datos sin estandarizar)
+d <- dist(provincias,
+          method = "euclidean") # method indica la métrica
+
+fviz_dist(d, show_labels = TRUE) + 
+  ggtitle("Matriz de distancias (datos sin estandarizar")
+
+# Ocurre que Barcelona y Madrid tiene valores muy diferentes al resto de provincias,
+# y por eso sus distancias con el resto de ptos son muy grandes y, en esta escala,
+# cuesta detectar diferencias entre las otras distancias. Los matices se verán mejor
+# cuando representemos con datos estandarizados
+
+# Aun así, sí se aprecian algunos grupos de ptos que están cerca entre sí y 
+# distanciados del resto (clusters):
+# - Madrid y Barcelona
+# - Provincias (típicamente más "ricas"): Bizkaia, Sevilla, Navarra, etc.
+# - Provincias (típ más "pobres"): Zamora, Teruel, Soria, Ourense, etc.
+#  - Valencia es la única prov que no parece estar en ninguno de estos 3 grupos
+
+```
+
+```{r eval = TRUE}
+
+# Para visualizar mejor los datos, los ESTANDARIZAMOS
+provincias_std <- provincias %>% mutate(across(where(is.numeric), rescale))
+
+# De nuevo, cambiamos los id numéricos por las propias provincias
+rownames(provincias_std) <- provincias_std$Prov
+
+# c) [EXTRA] mapa de calor de los datos (estandarizados)
+heatmaply(provincias_std %>% select(-Prov),
+          seriate = "mean", # Con seriate cambiamos el orden (OLO, mean...)
+          row_dend_left = TRUE,
+          plot_method = "plotly")
+
+# con los datos estandarizar, ahora sí vemos muchos detalles que antes era 
+# imposible detectar.Ahora ya podemos ver, por ej, por qué la primera distinción
+# en grupo de indiv es por un lado Madrid y Barcelona, y por otro lado el resto.
+
+```
+
+```{r eval = TRUE}
+
+# d) matriz de distancias (datos estandarizados)
+d_std <- dist(provincias_std,
+          method = "euclidean") # method indica la métrica
+
+fviz_dist(d_std, show_labels = TRUE) +
+  ggtitle("Matriz de distancias (datos estandarizados)")
+
+# Observamos ahora una distribución de grupos más difusa que cuando vimos los datos 
+# sin estandarizar, pero con la ventaja de que ahora podemos idenficar algunos grupos
+# más; es decir, al estandarizar, hemos logrado mayor grado de distinción entre grupos:
+# - Madrid y Barcelona siguen siendo un grupo alejado del resto
+# - Valencia y Alicante son otro grupo
+# - Ceuta y Melilla otro
+# - Luego observamos dos grupos más, uno más grande (con subgrupos dentro) y el 
+# otro más pequeño. Pero ahora vemos que las diferencias no están tan claras, incluso 
+# parece que podría haber un grupo más (7 en total)... (lo mejor será usar los
+# algoritmos de clustering)
+
+```
+
+
+# Ejercicio 7:
+
+> Realiza al menos tres análisis de clúster jerárquico con distintos enlaces y comenta las diferencias. En cada caso visualiza el dendograma y comenta cuántos clústers recomendarías usar (haciendo uso de la información de apartados anteriores)
+
+
+```{r eval = TRUE}
+
+# algoritmos jerárquicos - función hclust
+
+## 1) enlace SIMPLE o dist mín (vecinos más cercanos)
+single_clust <- hclust(d_std, method = "single")
+
+# - dendograma sin clusters
+fviz_dend(single_clust) + 
+  labs(title = "Dendograma (enlace SIMPLE)")
+
+# - dendograma con k clusters
+
+# Con la info que comentamos a raíz de la matriz de distancias representada, podríamos
+# usar entre 3 y 6 clústers. (Para decidir mejor el número óptimo, podemos realizar
+# luego un análisis para determinarlo, pero por ahora vamos a razonarlo observando
+# el dendograma)
+
+# Observando los cortes del dendograma y la info de apartados anteriores, pensamos
+# que lo mejor sería usar k = 5. Veamos cómo quedaría:
+
+col = c('darkgreen','green',"#E7B800","#2E9FDF",'purple','red','orange')
+
+fviz_dend(single_clust, k = 5,
+          cex = 0.8, # tamaño de texto del eje x
+          k_colors = col,
+          color_labels_by_k = TRUE, # color de texto del eje x
+          ylim = c(-0.25,2),
+          rect = TRUE) + # añade un rectángulo alrededor
+  labs(title = "Dendograma (enlace SIMPLE)")
+
+# Observamos que el método simple no ayuda a distinguir de forma clara grupos
+# dentro del conjunto de provincias más allá de las que están claramente aisladas
+# (Madrid, Barcelona, Valencia y Alicante). En el siguiente punto, veremos si otros
+# métodos arrojan mejores resultados.
+
+```
+
+```{r eval = TRUE}
+
+## 2) enlace COMPLETO o dist máx (indiv más lejanos)
+complete_clust <- hclust(d_std, method = "complete")
+
+# - dendograma sin clusters
+fviz_dend(complete_clust) + 
+  labs(title = "Dendograma (enlace COMPLETO)")
+
+# - dendograma con k clusters
+# Observando el dendograma, estimamos que, en este caso, k = 6 es lo óptimo
+
+fviz_dend(complete_clust, k = 6, # probemos con 6 clusters
+          cex = 0.8, # tamaño de texto del eje x
+          k_colors = col,
+          color_labels_by_k = TRUE, # color de texto del eje x
+          ylim = c(-0.25,4),
+          rect = TRUE) + # añade un rectángulo alrededor
+  labs(title = "Dendograma (enlace COMPLETO)")
+
+# Con el enlace completo sí observamos algo que nos recuerda más a lo que observamos
+# con la matriz de distancias: por un lado, los 2 grupos "aislados" (Madrid y Barcelona,
+# Valencia y Alicante), y por otro lado, los demás grupos, más cercanos entre sí,
+# como si pudieran considerarse subgrupos de un mismo grupo. De hecho, podemos probar
+# a reducir k (= 4 o 5) y no sería una mala división. Aunque, considerando que tenemos
+# 52 observaciones con características bastante heterogéneas, nos parece más acertado 
+# aumentar un poco el número de grupos (k = 6), para reflejar esa variedad.
+
+# No subiríamos a 7 grupos ni más porque, como vemos en el dendograma, estaríamos 
+# diferenciando algunos grupos pero dejando otros con distancias muy similares sin
+# diferenciar, y eso supondría una división subóptima de los datos, en lo que a su
+# interpretación se refiere (sería una mala categorización)
+
+```
+
+```{r eval = TRUE}
+
+## 3) enlace medio o dist media entre observaciones (de distintos grupos)
+average_clust <- hclust(d_std, method = "average")
+
+# - dendograma sin clusters
+fviz_dend(average_clust) + 
+  labs(title = "Dendograma (enlace MEDIO)")
+
+# - dendograma con k clusters
+# Observando el dendograma, estimamos que, en este caso, k = 6 es lo óptimo
+
+fviz_dend(average_clust, k = 8, # probemos con 6 clusters
+          cex = 0.8, # tamaño de texto del eje x
+          k_colors = col,
+          color_labels_by_k = TRUE, # color de texto del eje x
+          ylim = c(-0.25,4),
+          rect = TRUE) + # añade un rectángulo alrededor
+  labs(title = "Dendograma (enlace MEDIO)")
+
+# en este caso, nos encontramos con un dilema, pues con k=8 justo dividimos los dos
+# grupos de la derecha del gráfico, pero deja sin dividir, por muy poco, a Alicante
+# y Valencia. Por un lado, ya mencionamos antes la importancia de no elegir un corte 
+# que implique la división de algunos grupos pero no la de otros con distancias muy
+# similares; no obstante, aquí el grupo de Valencia y Alicante está muy separado del 
+# resto de observaciones, por lo que, aunque entre las propias Valencia y Alicante
+# haya distancias similares a las de los otros grupos, creemos que tiene sentido
+# (a nivel explicativo de los datos) cortar en k=8 y mantener esas dos provincias
+# en un único grupo.
+
+## Tras probar estos 3 métodos, lo que podemos concluir es que el método 2 es el que
+## consigue distinguir los (6) grupos de forma más clara y diferenciada (el "punto"
+## de corte es más elevado que en los otros dos métodos; su dendograma muestra una
+## división más clara).
+
+```
+
+# Ejercicio 8:
+
+> Echa un vistazo al final de las diapositivas de clase. ¿Qué número óptimo de clusters nos indican el criterio de Silhoutte y el de la varianza intracluster W? Detalla lo que consideres de ambos criterios y representa los individuos agrupados según el número de clusters elegido.
+
+```{r eval = TRUE}
+
+# Determinemos el número k óptimo de clusters (categorías) cuando no lo conocemos,
+# empleando los criterios de silhouette y de varianza intracluster W ("wss")
+
+# a) Silhouette
+
+fviz_nbclust(provincias_std[ ,-1],
+             kmeans,
+             method = "wss") + # wss,
+  geom_vline(xintercept = 3, # elegimos visualmente el k óptimo y lo pintamos
+             linetype = 2) +
+  geom_vline(xintercept = 5,
+             linetype = 3) +
+  theme_minimal() +
+  labs(x = "nº clústeres (k)",
+       y = "Variabilidad total intra-clústeres (W)",
+       title = "Número óptimo de clusters basado en variabilidad total intra-clústeres")
+
+# la línea vertical la hemos pintado a posteriori, tras determinar visualmente el
+# k óptimo, escogiendo el k cuando la varianza intracluster W ya no se reduce de
+# forma significativa ("Elbow method").
+
+# En este caso en particular, hemos mostrado dos líneas porque consideramos que tanto
+# k = 3 como k = 5 son candidatos a k óptimos. 
+
+```
+
+```{r eval = TRUE}
+
+# b) Silhouette
+
+fviz_nbclust(provincias_std[ ,-1],
+             kmeans,
+             method = "silhouette") + # wss,
+  theme_minimal() +
+  labs(x = "nº clústeres (k)",
+       y = "índice Silhouette",
+       title = "Número óptimo de clusters basado en el índice de Silhouette")
+
+# la línea vertical la escoge y pinta la propia función. El método determina 
+# k = 3 como nº óptimo. Este resultado coincide con el del método de enlace 
+# SIMPLE visto anteriormente, y esto se debe a que el método silhouette se basa
+# en la compacidad de los datos, y el método de enlace simple se basa en la distancia
+# mínima entre vecinos, por lo que tiene sentido que arrojen conclusiones similares.
+
+```
+```{r eval = TRUE}
+
+# Una vez detectados los dos posibles k óptimos (3 y 5), vamos a visualizar los
+# datos agrupados tanto con k = 3 como con k = 5, para ver si podemos observar
+# algo que nos ayude a decidir cuál de los valores es mejor, y también para ver cómo
+# quedan distribuidos los clusters.
+
+# Para representar, escogeremos el método de enlace COMPLETO, pues con lo visto en el
+# ejercicio 7, consideramos que es el mejor método (de los 3 que hemos utilizado) de
+# selección de clusters para nuestro dataset.
+
+# k = 3
+groups_3 <- cutree(complete_clust, k = 3)
+
+fviz_cluster(list(data = provincias_std %>% select(-Prov),
+                  cluster = groups_3), # groups
+             palette = c('blue','red','green'),
+             ellipse.type = "convex",
+             repel = TRUE,
+             show.clust.cent = FALSE,
+             geom = "point") + # por dfto c("point","text"), pero text lo pondrá geom_text
+
+  geom_text(label = rownames(provincias_std),
+            aes(color = as.factor(groups_3)), #aes con as.factor para que se pinte bien
+            check_overlap = TRUE,
+            nudge_x = 0.25, nudge_y = 0.25,
+            show.legend = FALSE) + # para que no pinte una "a" en la leyenda) +
+  
+  labs(title = "Cluster (complete)") + 
+  theme_minimal()
+
+# k = 5
+groups_5 <- cutree(complete_clust, k = 5)
+
+fviz_cluster(list(data = provincias_std %>% select(-Prov),
+                  cluster = groups_5), # groups
+             palette = c('blue','red','green','purple','orange'),
+             ellipse.type = "convex",
+             repel = TRUE,
+             show.clust.cent = FALSE,
+             geom = "point") + # por dfto c("point","text"), pero text lo pondrá geom_text
+
+  geom_text(label = rownames(provincias_std),
+            aes(color = as.factor(groups_5)), #aes con as.factor para que se pinte bien
+            check_overlap = TRUE,
+            nudge_x = 0.25, nudge_y = 0.25,
+            show.legend = FALSE) + # para que no pinte una "a" en la leyenda) +
+  
+  labs(title = "Cluster (complete)") + 
+  theme_minimal()
+
+# Observamos lo que ya sabíamos, que el clustering con k = 3 solo separa 4 provincias
+# (Madrid, Barcelona, Valencia y Alicante) del resto. Esto no nos parece una
+# categorización demasiado útil, y además, vemos que k = 3 no captura para nada 
+# la información de la comp Dim.2 (solo captura la de Dim.1), y esto es relevante
+# porque recordemos que entre ambas, reflejan el 78% de la info de nuestros datos.
+
+# Es por eso que consideramos más adecuado quedarnos con k = 5 (*)
+
+# (*) si el método de clustering es un algoritmo jerárquiro (luego veremos lo que
+# pasa con el algoritmo no jerárquico de k-means).
+
+# Comentario: observamos que k = 5 da lugar a dos clusters que, vistos en la proyección
+# de Dim.1 y Dim.2, se superponen en algunos puntos; cabe pues recordemos que 
+# estamos viendo la proyección en 2 dims de puntos que están en un espacio n-dimensional
+# (donde n es el nº de variabs orig), y que en ese espadio de mayor dimensión, los clusters 
+# sí estarán separados.
+
+```
+
+
+# Ejercicio 9:
+
+> Con el número de clusters decidido en el apartado anterior realizar un agrupamiento no jerárquico de k-medias. Representa los clusters formados en los planos de las Componentes principales. Interpreta los resultados y evalúa la calidad del análisis clúster. Explica las provincias que forman cada uno de los clusters y comentar cuales podrían ser las características socioeconómicas que las hacen pertenecer a dicho clúster
+
+```{r eval = TRUE}
+
+# ALGORITMO K-MEANS
+
+# Probemos primero con k = 5:
+kclust_5 <- kmeans(provincias_std %>% select(-Prov),
+                 centers = 5, # k óptimo escogido
+                 nstart = 25, # (*)
+                 iter.max = 50) # iteracciones máximas del algoritmo
+
+# representar los clusters en las Comp Princ:
+fviz_cluster(list(data = provincias_std %>% select(-Prov),
+                  cluster = kclust_5$cluster),
+             palette = c("#2E9FDF","#E7B800","#00AFBB",'red','green'),
+             ellipse.type = "convex", 
+             repel = TRUE,
+             show.clust.cent = FALSE,
+             geom = "point") + # por dfto c("point","text"), pero text lo pondrá geom_text
+
+  geom_text(label = rownames(provincias_std),
+            aes(color = as.factor(kclust_5$cluster)), #aes con as.factor para que se pinte bien
+            check_overlap = TRUE,
+            nudge_x = 0.25, nudge_y = 0.25,
+            show.legend = FALSE) + # para que no pinte una "a" en la leyenda
+  
+  labs(title = "Cluster (k-means) con k = 5") + 
+  theme_minimal()
+
+# (*) se ha incluido nstart = 25 para solucionar el siguiente problema:
+
+# PROBLEMA: hemos detectado que, con k = 5, el análisis k-means nos devuelve 
+# resultados muy diferentes cada vez que lo ejecutamos. En otras palabras, con k = 5,
+# el algoritmo encuentra distintas formas de agrupar los datos en 5 clusters.
+
+# Antes de descartar k = 5 como k óptimo por este motivo, recordemos que la función
+# kmeans() utiliza centroides aleatorios (pues no se los estamos proporcionando).
+# Podríamos "ajustar" un poco esos centroides para obtener resultados más
+# consistentes.
+# 
+# Existen varias opciones, pero nos ceñiremos al temario de clase y
+# nos limitaremos a cambiar el argumento nstart (por defecto nstart = 1) y lo
+# fijaremos a nstart = 25, para que al incluir más centroides iniciales que los
+# k clusters que queremos al final, veamos si conseguimos mejorar la consistencia.
+# 
+# Efectivamente, con nstart = 25 el resultado sí es consistente.
+
+```
+
+```{r eval = TRUE}
+
+# Evaluemos la CALIDAD del análisis k-means (con k = 5)
+
+# función silhouette:
+sil <- silhouette(kclust_5$cluster, d_std) # kclust$cluster
+
+row.names(sil) <- row.names(provincias_std) # filas, no cols! Del "1" al "150"
+
+# Visualización
+fviz_silhouette(sil, label = TRUE) +
+  scale_fill_manual(values = c("#2E9FDF","#2edf6e","#E7B800","#FC4E07",'purple')) +
+  scale_color_manual(values = c("#2E9FDF","#2edf6e","#E7B800","#FC4E07",'purple')) +
+  theme_minimal() +
+  labs(title = "Índice silhouette para k-means con k = 5") +
+  theme(axis.text.x = element_text(angle = 90, # (girar etiquetas eje x)
+                                   vjust = 0.5, hjust=1))
+
+# Explicación:
+# La silueta mide la similitud entre una observación y las demás en su mismo cluster,
+# en contraste con su similitud con las de otros clusters. Su valor oscila entre -1 y 1,
+# de modo que un valor cercano a 1 indica que la observación está agrupada correctamente
+# (ie, es muy similar al resto del cluster), mientras que cercana a -1 indica que 
+# podríamos considerar cambiarla de cluster para mejorar el resultado.
+
+# Tener muchos valores lo más cercanos a 1 posible nos indica que el
+# clustering realizado es adecuado. Si por el contrario tenemos muchos valores bajos o negativos,
+# podríamos considerar que el agrupamiento no es adecuado.
+
+# En nuestro caso, para k = 5 vemos que todas las observaciones están por debajo de
+# 0.5, excepto 2. Y muchas por debajo de 0.25. Luego veremos que este no es el mejor
+# escenario, pues con otros k clusters se obtienen mejores resultados.
+
+```
+
+```{r eval = TRUE}
+
+# En este punto, recordemos que escogimos k = 5 en lugar de k = 3 porque, para el
+# método de clustering por enlace completo, solo separaba Madrid, Barcelona, Valencia
+# y Alicante en 2 clusters, y todas las demás en un tercer y único cluster.
+ # Pero vamos a probar el k-means con k = 3 y ver si el resultado difiere.
+
+# k-means (k = 3)
+kclust_3 <- kmeans(provincias_std %>% select(-Prov),
+                 centers = 3,
+                 # nstart = 25, # con k = 3 no ha hecho falta
+                 iter.max = 50)
+
+fviz_cluster(list(data = provincias_std %>% select(-Prov),
+                  cluster = kclust_3$cluster),
+             palette = c("#2E9FDF",'red','green'),
+             ellipse.type = "convex", 
+             repel = TRUE,
+             show.clust.cent = FALSE,
+             geom = "point") + 
+  geom_text(label = rownames(provincias_std),
+            aes(color = as.factor(kclust_3$cluster)),
+            check_overlap = TRUE,
+            nudge_x = 0.25, nudge_y = 0.25,
+            show.legend = FALSE) + 
+  labs(title = "Cluster (k-means) con k = 3") + 
+  theme_minimal()
+
+# CALIDAD (k = 3)
+sil <- silhouette(kclust_3$cluster, d_std)
+row.names(sil) <- row.names(provincias_std)
+
+fviz_silhouette(sil, label = TRUE) +
+  scale_fill_manual(values = c("#2E9FDF","#2edf6e","#E7B800","#FC4E07",'purple')) +
+  scale_color_manual(values = c("#2E9FDF","#2edf6e","#E7B800","#FC4E07",'purple')) +
+  theme_minimal() +
+  labs(title = "Índice silhouette para k-means con k = 3") +
+  theme(axis.text.x = element_text(angle = 90,vjust = 0.5,hjust=1))
+
+# Vemos que mejora ligeramente el resultado (fijarse en la línea roja punteada, que
+# da la media).
+
+# Sin embargo, sí hay algo que nos da que pensar:
+# A diferencia de lo que ocurría con el método COMPLETO (algoritmo jerárquico), 
+# cuando probamos con el algoritmo k-means (no jerárquico) con k = 3, el resultado
+# sí refleja la diferenciación debida a la Dim.2. El problema es que ahora hay poca
+# diferenciación debida a la componente principal, y eso no nos convence, ya que
+# ésta es la comp que explica la mayor varianza de los datos.
+
+# Por este motivo, vamos a probar también k-means con el k intermedio, k = 4.
+kclust_4 <- kmeans(provincias_std %>% select(-Prov),
+                 centers = 4,
+                 nstart = 25,
+                 iter.max = 50)
+fviz_cluster(list(data = provincias_std %>% select(-Prov),
+                  cluster = kclust_4$cluster),
+             palette = c("#2E9FDF",'red','green','orange'),
+             ellipse.type = "convex", 
+             repel = TRUE,
+             show.clust.cent = FALSE,
+             geom = "point") +
+  geom_text(label = rownames(provincias_std),
+            aes(color = as.factor(kclust_4$cluster)),
+            check_overlap = TRUE,
+            nudge_x = 0.25, nudge_y = 0.25,
+            show.legend = FALSE) + 
+  labs(title = "Cluster (k-means) con k = 4") + 
+  theme_minimal()
+
+# Calidad (k = 4)
+sil <- silhouette(kclust_4$cluster, d_std)
+row.names(sil) <- row.names(provincias_std)
+
+fviz_silhouette(sil, label = TRUE) +
+  scale_fill_manual(values = c("#2E9FDF","#2edf6e","#E7B800","#FC4E07",'purple')) +
+  scale_color_manual(values = c("#2E9FDF","#2edf6e","#E7B800","#FC4E07",'purple')) +
+  theme_minimal() +
+  labs(title = "Índice silhouette para k-means con k = 4") +
+  theme(axis.text.x = element_text(angle = 90,vjust = 0.5,hjust=1))
+
+# El resultado es ligeramente mejor que con k = 5, y más o menos similar a k = 3.
+# Por esto, tanto k = 3 como k = 4 serían k's óptimos desde el punto de vista de la calidad.
+
+## NOTA: también se ha probado con k = 6 y k = 7, pero se obtenían resultados
+# de calidad notablemnte peor, por lo que se han descartado como opciones.
+
+```
+
+
+```{r eval = TRUE}
+
+# CONCLUSIÓN FINAL
+
+# Con un análisis de clustering con el algoritmo de k-means, los mejores resultados 
+# se obtienen para k = 3 y k = 4, siendo k = 3 el mejor, si tenemos en cuenta los análisis
+# que vimos anteriormente basados en la varianza intracluster (wss) y en la silueta,
+# como según el análisis de calidad (también basado en el criterio de la silueta) que
+# hemos realizado en este apartado.
+
+# No obstante, creemos que k = 4 también ofrece buenos resultados, y 
+# podríamos considerar otros aspectos del problema o situación que estuviéramos
+# estudiando, y decidir si nos conviene más tener 3 o 4 categorías.
+
+```
+
+> Explica las provincias que forman cada uno de los clusters y comentar cuales podrían ser las características socioeconómicas que las hacen pertenecer a dicho clúster.
+
+```{r eval = TRUE}
+
+### Vamos a responder esta pregunta para el caso de k-means con k = 3.
+
+# Previamente, veamos algunas cosas que podrían ser útiles en ciertas situaciones:
+
+# Provincias del cluster 1:
+provincias[which(provincias$cluster == 1),]
+# Provincias del cluster 2:
+provincias[which(provincias$cluster == 2),]
+# Provincias del cluster 3:
+provincias[which(provincias$cluster == 3),]
+
+
+kclust_3$centers # medias estandarizadas
+kclust_3$cluster # clusters
+provincias$cluster <- kclust_3$cluster # esta col luego nos sirve para el aggregate
+
+
+# MEDIA de cada variab orig para cada uno de los 3 clusters:
+prov_agrupadas_media <- aggregate(provincias[ ,2:19], list(provincias$cluster), mean)
+
+# RANGO de cada variab orig para cada uno de los 3 clusters:
+prov_agrupadas_max <- aggregate(provincias[ ,2:19], list(provincias$cluster), max)
+prov_agrupadas_min <- aggregate(provincias[ ,2:19], list(provincias$cluster), min)
+prov_agrupadas_rango <- prov_agrupadas_max - prov_agrupadas_min # rangos
+prov_agrupadas_rango$Group.1 <- c(1,2,3)
+
+
+# ------------------------------------------------------------------------------
+# PARTE 1: Explica las provincias que forman cada uno de los clusters
+
+# Analizando los datos, hemos visto un fenómeno interesante: aparte del clúster de Madrid
+# y Barcelona, los otros dos clústers separan las provincias entre mitad norte y mitad sur
+# de España. Lo mostramos:
+  
+df <- provincias[,c(1,20)]
+new_df <- df[order(df$cluster),]
+new_df # esto nos muestra qué provincias pertenecen a cada cluster
+
+# Vemos que efectivamente ocurre esa división entre NORTE y SUR, con 2 excepciones:
+# - Guadalajara, que está en el cluster de las provincias del sur, pero geográficamente
+#   está por encima de Cuenca (y Cuenca está en el clúster de las del norte - 
+#   geográficamente está en el medio).
+# - Tarragona, que está claramente en el norte, pero está en el cluster de las del sur.
+
+
+# ------------------------------------------------------------------------------
+# PARTE 2: comentar las características socioeconómicas que las hacen pertenecer a dicho clúster
+
+# Con el siguiente gráfico, podemos comparar visualmente los clusters variable a variable:
+# - mortalidad: la media del grupo 2 (norte) parece ser mayor que la dos grupo 3 (sur)
+# - natalidad: la media del grupo 3 (sur) parece ser mayor que la dos grupo 2 (norte)
+# Etc...
+# La info que veríamos en estos gráficos aportaría, a fin de cuentas, la misma información
+# que los valores de la media y el rango por clusters que vimos anteriormente, solo que
+# aquí lo visualizaríamos y tendríamos más presentes los propios datos originales.
+
+ggplot(provincias, aes(x = Prov, y = Natalidad, group = cluster)) +
+  geom_point(aes(color = as.factor(cluster)), cex=3) + 
+  labs(x = "Provincias") + 
+  theme(legend.title=element_blank(),
+        axis.text.x=element_text(angle=90, vjust=0.5, hjust=1))
+
+# Así, podríamos analizar una a una cada variable (su gráfico, su media y su rango), 
+# dictaminarqué variabs son (más) relevantes para clasificar las provincias en uno u
+# otro cluster, en función de a qué otras provincias se asemejan.
+# No obstante, lo más cómodo es usar PCA y representar en las 2 comps princ las provincias
+# agrupadas en los 3 clusters. Lógicamente, esto es lo que veníamos haciendo anteriormente
+# (precisamente porque es la manera óptima de representar, en 2Dim, toda la info posible).
+
+# Esto es útil porque las comps están relacionadas con las variabs, como ya vimos en el
+# EJERCICIO 4. De modo que, analizando el gráfico de PCA con los k = 3 clusters obtenidos
+# con k-means, podremos identificar las características socioeconómicas que más contribuyen
+# a diferenciar los clusters:
+
+# k-means (k = 3)
+fviz_cluster(list(data = provincias_std %>% select(-Prov),
+                  cluster = kclust_3$cluster),
+             palette = c("#2E9FDF",'red','green'),
+             ellipse.type = "convex", 
+             repel = TRUE,
+             show.clust.cent = FALSE,
+             geom = "point") + 
+  geom_text(label = rownames(provincias_std),
+            aes(color = as.factor(kclust_3$cluster)),
+            check_overlap = TRUE,
+            nudge_x = 0.25, nudge_y = 0.25,
+            show.legend = FALSE) + 
+  labs(title = "Cluster (k-means) con k = 3") + 
+  theme_minimal()
+
+# proyección de las variabs orig sobre las comp 1 y 2
+fviz_pca_var(pca_fit, col.var = "cos2",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE) +
+  theme_minimal() + 
+  labs(color= "Peso") +
+  ggtitle("Coordenadas de las variables en las dos Comp Principales")
+
+# -- CLUSTER 1:
+# Este cluster está formado por provincias (Madrid y Barcelona) con:
+# a) altos valores de Dim.1
+# interpretar la comp 1 es más fácil que la comp 2: para una provincia (o cluster), 
+# tener valores altos de Dim.1 se traduce tener valores altos de las variabs económicas
+# que vimos que están altamente correlacionadas con la comp 1 (ie: Número de empresas, 
+# Industria, Construcción, etc.). Lógicamente, Madrid y Barcelona tienen valores de
+# estas variabs notablemente más elevados que todas las demás provincias.
+# 
+# b) valores positivos de Dim.2
+# interpretar la comp 2 ya es más complicado, pues es combinación lineal de varias
+# variabs (principalmente TasaParo, TasaActividad, Natalidad, Mortalidad e IPC) que
+# no apuntan en la misma dirección ni sentido entre sí, y que no están tan altamente
+# correlacionadas con ella como lo están por ej Industria y Construcción con la comp 1.
+# 
+# TasaParo, Natalidad y TasaActividad contribuyen a incrementar la Dim.2, mientras
+# que Mortalidad e IPC contribuyen a disminuirla (IPC contribuye menos, ya que su
+# correlación con Dim.2 no es tan elevada, y además su peso se reparte entre Dim.1 y 
+# Dim.2).
+# Veamos cuánto valen estas variabs en ambas provincias:
+provincias[which( (provincias$Prov == "Madrid") | provincias$Prov == "Barcelona"),
+           c("Prov","Mortalidad","Natalidad","IPC","TasaParo","TasaActividad")]
+
+# Veamos un ejemplo:
+# Barcelona tiene Dim.2 mayor que Madrid, y sin embargo, también tiene una Mortalidad
+# mayor. ¿Cómo es esto posible, si la mortalidad contribuye negativamente a la comp 2?
+# (y lo mismo ocurre con TasaParo)
+# Pues ocurre porque, recordemos, la Dim.2 no es solo la mortalidad, sino una combinación
+# de variabs. Así pues, aunque Barcelona tenga mayor mortalidad, Madrid tiene menor IPC,
+# mayor natalidad, y mayor TasaActividad.
+# 
+# En cualquier caso, al ser solo dos provincias en este cluster y además ambas estar
+# relativamente cercanas en Dim.1 y Dim.2, podemos concluir lo siguiente: el cluster 1
+# engloba a las provincias con valores elevados de las 11 variabs orig que están altamente
+# correlacionadas con la comp 1, y que ya vimos que están ligadas al desarrollo económico.
+
+
+# -- CLUSTERS 2 y 3:
+# Por su parte, los clusters 2 y 3 tienen valores positivos de la comp 1, pero mucho menores
+# que el cluster 1. Lo más relevante es que ambos clusters abarcan rangos similares en dicha
+# comp 1 (despuntando un poco las provincias de Valencia y Alicante), lo cual refleja peores
+# valores económicos que Madrid y Barcelona. Y también nos indica que para diferenciar o
+# clasificar las provincias entre estos dos clusters, debemos centrarnos, ahora sí, en
+# la Dim.2.
+# 
+# Las provincias del cluster 3 (sur) toman todas valores negativos de la comp 2
+# (excepto Cáceres, pero igualmente está muy cercana a cero); mientras que las del cluster 2
+# (norte) toman valores mayoritariamente positivos, aunque algunas están cercanas a cero
+# (y algunas como Girona y Baleares son negativas).
+# 
+# A rasgos generales, ya hemos visto (con el ejemplo de Madrid y Barcelona) que el
+# hecho de que ambos clusters se diferencien principalmente por la Dim.2 no nos ayuda
+# a determinar cómo se traduce esa diferencia en términos de las variabs orig. Pero
+# al menos sí podemos afirmar que esa diferencia se debe mayoritariamente a las variabs
+# que más peso tienen en la Dim.2, a saber: TasaParo, TasaActividad, Natalidad, Mortalidad
+# e IPC.
+
+```
+
+# Ejercicio 10:
+
+> Comenta o concluye cualquier aspecto que consideres y que no se haya respondido anteriormente.
+
+```{r eval = TRUE}
+
+# Se han incluido/comentado algunas cosas adicionales ya en los ejercicios anteriores.
+# De esta forma, se integraban en el orden seguido en la tarea.
+
+```
